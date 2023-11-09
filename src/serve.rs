@@ -72,7 +72,12 @@ async fn render_the_shit_out_of_some_mofo(app: impl FnOnce() -> leptos::View + '
 
     println!("!!!! calling render_to_string/stream");
     // let html = leptos::leptos_dom::ssr::render_to_string(app).into_owned(); //stream(app);
-    let stm = leptos::leptos_dom::ssr::render_to_stream(app);
+    // let stm = leptos::leptos_dom::ssr::render_to_stream(app);
+    let (stm, runtime) = leptos::leptos_dom::ssr::render_to_stream_with_prefix_undisposed_with_context_and_block_replacement(
+        app,
+        move || leptos_meta::generate_head_metadata_separated().1.into(),
+        || {},
+        false);
     let mut stm2 = Box::pin(stm);
 
     let first_app_chunk = stm2.next().await.unwrap_or_default();
@@ -101,7 +106,7 @@ async fn render_the_shit_out_of_some_mofo(app: impl FnOnce() -> leptos::View + '
     let mut stm4 = Box::pin(futures::stream::iter([first_chunk.unwrap(), second_chunk.unwrap()])
         .chain(stm3)
         .chain(futures::stream::once(async move {
-            // TODO: runtime.dispose()
+            runtime.dispose();
             tail.to_string()
         }).map(|html| html.into_bytes())));
 
