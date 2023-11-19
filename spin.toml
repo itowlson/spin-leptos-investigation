@@ -13,6 +13,7 @@ component = "what-could-go-wrong"
 [component.what-could-go-wrong]
 source = "target/wasm32-wasi/release/what_could_go_wrong.wasm"
 allowed_outbound_hosts = []
+key_value_stores = ["default"]
 [component.what-could-go-wrong.build]
 command = "LEPTOS_OUTPUT_NAME=what_could_go_wrong cargo build --target wasm32-wasi --release --no-default-features --features ssr"
 watch = ["src/**/*.rs", "Cargo.toml"]
@@ -23,4 +24,12 @@ component = "pkg"
 
 [component.pkg]
 source = { url = "https://github.com/fermyon/spin-fileserver/releases/download/v0.1.0/spin_static_fs.wasm", digest = "sha256:96c76d9af86420b39eb6cd7be5550e3cb5d4cc4de572ce0fd1f6a29471536cb4" }
-files = [{ source = "site/pkg", destination = "/" }, { source = "target/wasm32-unknown-unknown/debug/what_could_go_wrong.wasm", destination = "/what_could_go_wrong.wasm" }]
+files = [{ source = "target/site/pkg", destination = "/" }]
+
+# [[trigger.http]]
+# route = "/favicon.ico"
+# component = "favicon"
+
+# [component.favicon]
+# source = { url = "https://github.com/fermyon/spin-fileserver/releases/download/v0.1.0/spin_static_fs.wasm", digest = "sha256:96c76d9af86420b39eb6cd7be5550e3cb5d4cc4de572ce0fd1f6a29471536cb4" }
+# files = [{ source = "site/favicon.ico", destination = "/favicon.ico" }]

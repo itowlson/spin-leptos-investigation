@@ -1,7 +1,6 @@
-use leptos::IntoView;
+use leptos::{IntoView, ServerFn};
 use leptos_router::RouteListing;
-// use spin_sdk::http::conversions::TryFromRequest;
-use spin_sdk::http::{IntoResponse, ResponseOutparam, IncomingRequest, OutgoingResponse, Headers};
+use spin_sdk::http::{ResponseOutparam, IncomingRequest, OutgoingResponse, Headers};
 use spin_sdk::http_component;
 use futures::StreamExt;
 use futures::SinkExt;
@@ -13,28 +12,28 @@ async fn handle_what_could_go_wrong(req: IncomingRequest, resp_out: ResponseOutp
     let mut conf = leptos::get_configuration(None).await.unwrap();
     conf.leptos_options.output_name = "what_could_go_wrong".to_owned();
 
-    println!("CONF: {:?}", conf);
-    // leptos::provide_context(resp_opts.clone());  // this panics. I am not sure where we set up this context thing
-
     let routes = generate_route_list(crate::app::App);
 
-    let mut router = spin_sdk::http::Router::new();
-    router.any("/api/*", handle_server_fns);
+    crate::app::SaveCount::register_explicit().unwrap();
 
     let url = url::Url::parse(&req.uri()).unwrap();
     let path = url.path();
 
-    // TODO: We don't really want to create closures for _all_ the routes at run time.
-    // We want to find the _best_ route and run the handler for that.
     let mut rf = routefinder::Router::new();
     for listing in routes{
         let path = listing.path().to_owned();
-        rf.add(path, listing).unwrap();
+        rf.add(path, Some(listing)).unwrap();
     }
+    rf.add("/api/*", None).unwrap();
 
     // TODO: do we need to provide fallback to next best match if method does not match?  Probably
     let best_listing = rf.best_match(path).unwrap();
     // TODO: ensure req.method() is acceptable
+
+    let Some(best_listing) = best_listing.as_ref() else {
+        handle_server_fns(req, resp_out).await;
+        return;
+    };
 
     if let Some(_static_mode) = best_listing.static_mode() {
         println!("GOT {}: using static mode", path);
@@ -46,19 +45,14 @@ async fn handle_what_could_go_wrong(req: IncomingRequest, resp_out: ResponseOutp
             leptos_router::SsrMode::OutOfOrder => {
                 let res_options = crate::spleppy::ResponseOptions::default();
                 let app = {
-                    println!("!!!! doing the app_fn dance");
                     let app_fn = crate::app::App.clone();
                     let res_options = res_options.clone();
                     move || {
-                        println!("!!!! providing contexts");
                         provide_contexts(&url, res_options);
-                        println!("!!!! calling app_fn");
-                        let v = (app_fn)().into_view();  // SOMEWHERE IN HERE
-                        println!("!!!! called app_fn !!!!");
-                        v
+                        (app_fn)().into_view()
                     }
                 };
-                render_the_shit_out_of_some_mofo(app, &conf, resp_out).await;
+                render_view_into_response_stm(app, &conf, resp_out).await;
             },
             mode => panic!("oh no mode = {mode:?} what does it mean")
         }
@@ -66,25 +60,22 @@ async fn handle_what_could_go_wrong(req: IncomingRequest, resp_out: ResponseOutp
 
 }
 
-async fn render_the_shit_out_of_some_mofo(app: impl FnOnce() -> leptos::View + 'static, conf: &leptos::leptos_config::ConfFile, resp_out: ResponseOutparam) {
+async fn render_view_into_response_stm(app: impl FnOnce() -> leptos::View + 'static, conf: &leptos::leptos_config::ConfFile, resp_out: ResponseOutparam) {
     let leptos_opts = &conf.leptos_options;
     let resp_opts = crate::spleppy::ResponseOptions::default();
 
-    println!("!!!! calling render_to_string/stream");
-    // let html = leptos::leptos_dom::ssr::render_to_string(app).into_owned(); //stream(app);
-    // let stm = leptos::leptos_dom::ssr::render_to_stream(app);
     let (stm, runtime) = leptos::leptos_dom::ssr::render_to_stream_with_prefix_undisposed_with_context_and_block_replacement(
         app,
-        move || leptos_meta::generate_head_metadata_separated().1.into(),
+        move || {
+            let (_h, b) = leptos_meta::generate_head_metadata_separated();
+            b.into()
+        },
         || {},
         false);
     let mut stm2 = Box::pin(stm);
 
     let first_app_chunk = stm2.next().await.unwrap_or_default();
     let (head, tail) = leptos_integration_utils::html_parts_separated(&leptos_opts, leptos::use_context::<leptos_meta::MetaContext>().as_ref());
-
-    println!("!!!! called render_to_string/stream");
-    // println!("RES IS {}", html);
 
     let mut stm3 = Box::pin(futures::stream::once(async move { head.clone() })
         .chain(futures::stream::once(async move { first_app_chunk })
@@ -116,17 +107,39 @@ async fn render_the_shit_out_of_some_mofo(app: impl FnOnce() -> leptos::View + '
 
 }
 
-fn handle_server_fns(req: spin_sdk::http::Request, params: spin_sdk::http::Params) -> impl IntoResponse {
-    println!("HSF PATH: {}", req.path());
-    for p in params {
-        println!("- PARM: {} = {}", p.name(), p.value());
-    }
+async fn handle_server_fns(req: IncomingRequest, resp_out: ResponseOutparam) {
+    let pq = req.path_with_query().unwrap_or_default();
+    let url = url::Url::parse(&req.uri()).unwrap();
+    let mut path_segs = url.path_segments().unwrap().collect::<Vec<_>>();
 
-    if let Some(_lepfn) = leptos::leptos_server::server_fn_by_path(req.path()) {
-        println!("- WE HAVE A LEPFN");
-    }
+    let payload = loop {
+        if path_segs.is_empty() {
+            panic!("NO LEPTOS FN!  Ran out of path segs looking for a match");
+        }
 
-    http::Response::builder().status(500).body(()).unwrap()
+        let candidate = path_segs.join("/");
+
+        if let Some(lepfn) = leptos::leptos_server::server_fn_by_path(&candidate) {
+            // TODO: better checking here
+            if pq.starts_with(lepfn.prefix()) {
+                let bod = req.into_body().await.unwrap();
+                break lepfn.call((), &bod).await.unwrap();
+            }
+        }
+
+        path_segs.remove(0);
+    };
+
+    let plbytes = match payload {
+        leptos::server_fn::Payload::Binary(b) => b,
+        leptos::server_fn::Payload::Json(s) => s.into_bytes(),
+        leptos::server_fn::Payload::Url(u) => u.into_bytes(),
+    };
+
+    let og = OutgoingResponse::new(200, &Headers::new(&[]));
+    let mut ogbod = og.take_body();
+    resp_out.set(og);
+    ogbod.send(plbytes).await.unwrap();
 }
 
 pub fn generate_route_list<IV>(
@@ -137,10 +150,6 @@ where
 {
     let (routes, _static_data_map) =
         leptos_router::generate_route_list_inner(app_fn);
-
-    for r in &routes {
-        println!("GOTTA ROUTE P={} LP={}", r.path(), r.leptos_path());
-    }
 
     let routes2 = routes.into_iter()
         .map(empty_to_slash)
@@ -177,7 +186,7 @@ fn leptos_wildcards_to_spin(listing: RouteListing) -> RouteListing {
 }
 
 // since we control `generate_route_list` maybe we don't need this?
-fn to_sdk(method: leptos_router::Method) -> spin_sdk::http::Method {
+fn _method_to_sdk(method: leptos_router::Method) -> spin_sdk::http::Method {
     match method {
         leptos_router::Method::Get => spin_sdk::http::Method::Get,
         leptos_router::Method::Post => spin_sdk::http::Method::Post,
@@ -187,11 +196,11 @@ fn to_sdk(method: leptos_router::Method) -> spin_sdk::http::Method {
     }
 }
 
-fn app_to_sdk<IV>(_app_fn: impl Fn() -> IV + Clone + Send + 'static) -> impl Fn(spin_sdk::http::Request, spin_sdk::http::Params) -> spin_sdk::http::Response
-where IV: leptos::IntoView + 'static, 
-{
-    |_r, _p| spin_sdk::http::responses::internal_server_error()
-}
+// fn app_to_sdk<IV>(_app_fn: impl Fn() -> IV + Clone + Send + 'static) -> impl Fn(spin_sdk::http::Request, spin_sdk::http::Params) -> spin_sdk::http::Response
+// where IV: leptos::IntoView + 'static, 
+// {
+//     |_r, _p| spin_sdk::http::responses::internal_server_error()
+// }
 
 fn provide_contexts(url: &url::Url, res_options: crate::spleppy::ResponseOptions) {
     use leptos::provide_context;

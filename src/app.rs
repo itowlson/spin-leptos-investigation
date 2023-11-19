@@ -4,14 +4,12 @@ use leptos_router::*;
 
 #[component]
 pub fn App() -> impl IntoView {
-    println!("HERE WE ARE in the App");
     // Provides context that manages stylesheets, titles, meta tags, etc.
     provide_meta_context();
-    println!("with our meta contexts");
 
     // Okay so we are obeying the Router I think but the Stylesheet and Title are NOT
     // getting run.  WHY NOT
-    let v = view! {
+    view! {
         // injects a stylesheet into the document <head>
         // id=leptos means cargo-leptos will hot-reload this stylesheet
         <Stylesheet id="leptos" href="/pkg/what_could_go_wrong.css"/>
@@ -28,28 +26,23 @@ pub fn App() -> impl IntoView {
                 </Routes>
             </main>
         </Router>
-    };
-
-    println!("After the view! macro");
-
-    v
+    }
 }
 
 /// Renders the home page of your application.
 #[component]
 fn HomePage() -> impl IntoView {
-    println!("HERE WE ARE in the HomePage");
     // Creates a reactive value to update the button
     let (count, set_count) = create_signal(0);
     let on_click = move |_| {
-        set_count.update(|count| *count += 1);
-        spawn_local(async move {
-            save_count(count.get()).await.unwrap(); // YOLO
+        request_animation_frame(move || { // !!! REQUEST_ANIMATION_FRAME IS VERY IMPORTANT !!! at least for now
+            set_count.update(|count| *count += 1);
+            spawn_local(async move {
+                save_count(count.get()).await.unwrap(); // YOLO
+            });
         });
-
     };
 
-    println!("about to call HomePage view!");
     view! {
         <h1>"Welcome to Leptos!"</h1>
         <button on:click=on_click>"Click Me: " {count}</button>
@@ -80,9 +73,8 @@ fn NotFound() -> impl IntoView {
 
 #[server(SaveCount, "/api")]
 pub async fn save_count(count: u32) -> Result<(), ServerFnError> {
-    use std::io::Write;
     println!("SAVING {count}");
-    let mut wr = std::fs::File::create("PLOPPLES.txt")?;
-    write!(wr, "{count}")?;
+    let st = spin_sdk::key_value::Store::open_default()?;
+    st.set_json("THE COUNT AH HA HA HA", &count).map_err(|e| ServerFnError::ServerError(e.to_string()))?;
     Ok(())
 }
