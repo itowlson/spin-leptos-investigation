@@ -9,6 +9,9 @@ async fn handle_what_could_go_wrong(req: IncomingRequest, resp_out: ResponseOutp
     conf.leptos_options.output_name = "what_could_go_wrong".to_owned();
 
     crate::app::SaveCount::register_explicit().unwrap();
+    crate::app::GetServerCount::register_explicit().unwrap();
+    crate::app::AdjustServerCount::register_explicit().unwrap();
+    crate::app::ClearServerCount::register_explicit().unwrap();
 
     let app_fn = crate::app::App;
 

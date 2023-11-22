@@ -21,7 +21,7 @@ pub fn App() -> impl IntoView {
         <Router>
             <main>
                 <Routes>
-                    <Route path="" view=HomePage/>
+                    <Route path="" view=|| { view! { <HomePage/> } } />
                     <Route path="/*any" view=NotFound/>
                 </Routes>
             </main>
@@ -32,20 +32,55 @@ pub fn App() -> impl IntoView {
 /// Renders the home page of your application.
 #[component]
 fn HomePage() -> impl IntoView {
+    // let init = get_server_count().await.unwrap();  // NO await IN SYNC FN
+
+    let dec = create_action(|_| adjust_server_count(-1, "decing".into()));
+    let inc = create_action(|_| adjust_server_count(1, "incing".into()));
+    // let clear = create_action(|_| clear_server_count());
+    let counter = create_resource(
+        move || {
+            (
+                dec.version().get(),
+                inc.version().get(),
+                // clear.version().get(),
+            )
+        },
+        |_| get_server_count(),
+    );
+
+    let value =
+        move || counter.get().map(|count| count.unwrap_or(0)).unwrap_or(0);
+
     // Creates a reactive value to update the button
-    let (count, set_count) = create_signal(0);
-    let on_click = move |_| {
+    // let (count, set_count) = create_signal(0);
+    let on_incr_click = move |_| {
         request_animation_frame(move || { // !!! REQUEST_ANIMATION_FRAME IS VERY IMPORTANT !!! at least for now
-            set_count.update(|count| *count += 1);
             spawn_local(async move {
-                save_count(count.get()).await.unwrap(); // YOLO
+                inc.dispatch(())
             });
+            // set_count.update(|count| *count += 1);
+            // spawn_local(async move {
+            //     save_count(count.get()).await.unwrap(); // YOLO
+            // });
+        });
+    };
+    let on_decr_click = move |_| {
+        request_animation_frame(move || { // !!! REQUEST_ANIMATION_FRAME IS VERY IMPORTANT !!! at least for now
+            spawn_local(async move {
+                dec.dispatch(())
+            });
+            // set_count.update(|count| *count += 1);
+            // spawn_local(async move {
+            //     let new = adjust_server_count(-1, "decring".to_string()).await.unwrap();
+            //     set_count.update(|count| *count = new);
+            // });
         });
     };
 
     view! {
-        <h1>"Welcome to Leptos!"</h1>
-        <button on:click=on_click>"Click Me: " {count}</button>
+        <h1>"The value is " {value}</h1>
+        <button on:click=on_incr_click>"Incr"</button>
+        <button on:click=on_decr_click>"Decr"</button>
     }
 }
 
@@ -71,10 +106,41 @@ fn NotFound() -> impl IntoView {
     }
 }
 
+#[cfg(feature = "ssr")]
+const COUNT_KEY: &'static str = "THE COUNT AH HA HA HA";
+
 #[server(SaveCount, "/api")]
-pub async fn save_count(count: u32) -> Result<(), ServerFnError> {
+pub async fn save_count(count: i32) -> Result<(), ServerFnError> {
     println!("SAVING {count}");
     let st = spin_sdk::key_value::Store::open_default()?;
-    st.set_json("THE COUNT AH HA HA HA", &count).map_err(|e| ServerFnError::ServerError(e.to_string()))?;
+    st.set_json(COUNT_KEY, &count).map_err(|e| ServerFnError::ServerError(e.to_string()))?;
     Ok(())
+}
+
+#[server(GetServerCount, "/api")]
+pub async fn get_server_count() -> Result<i32, ServerFnError> {
+    let st = spin_sdk::key_value::Store::open_default()?;
+    let count: i32 = st.get_json(COUNT_KEY).map_err(|e| ServerFnError::ServerError(e.to_string()))?.unwrap_or_default();
+    Ok(count)
+}
+
+#[server(AdjustServerCount, "/api")]
+pub async fn adjust_server_count(
+    delta: i32,
+    msg: String,
+) -> Result<i32, ServerFnError> {
+    let st = spin_sdk::key_value::Store::open_default()?;
+    let count: i32 = st.get_json(COUNT_KEY).map_err(|e| ServerFnError::ServerError(e.to_string()))?.unwrap_or_default();
+    let new = count + delta;
+    st.set_json(COUNT_KEY, &new).map_err(|e| ServerFnError::ServerError(e.to_string()))?;
+    // _ = COUNT_CHANNEL.send(&new).await;
+    println!("message = {:?}", msg);
+    Ok(new)
+}
+
+#[server(ClearServerCount, "/api")]
+pub async fn clear_server_count() -> Result<i32, ServerFnError> {
+    let st = spin_sdk::key_value::Store::open_default()?;
+    st.set_json(COUNT_KEY, &0).map_err(|e| ServerFnError::ServerError(e.to_string()))?;
+    Ok(0)
 }
