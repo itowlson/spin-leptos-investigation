@@ -119,9 +119,12 @@ pub async fn save_count(count: i32) -> Result<(), ServerFnError> {
 
 #[server(GetServerCount, "/api")]
 pub async fn get_server_count() -> Result<i32, ServerFnError> {
-    let st = spin_sdk::key_value::Store::open_default()?;
-    let count: i32 = st.get_json(COUNT_KEY).map_err(|e| ServerFnError::ServerError(e.to_string()))?.unwrap_or_default();
-    Ok(count)
+    // let st = spin_sdk::key_value::Store::open_default()?;
+    // let count: i32 = st.get_json(COUNT_KEY).map_err(|e| ServerFnError::ServerError(e.to_string()))?.unwrap_or_default();
+    let request = spin_sdk::http::Request::builder().uri("https://google.co.nz").build();
+    let resp: spin_sdk::http::Response = spin_sdk::http::send(request).await.unwrap();
+    let bodlen = resp.body().len().try_into().unwrap();
+    Ok(bodlen)
 }
 
 #[server(AdjustServerCount, "/api")]

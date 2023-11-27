@@ -12,7 +12,7 @@ component = "what-could-go-wrong"
 
 [component.what-could-go-wrong]
 source = "target/wasm32-wasi/release/what_could_go_wrong.wasm"
-allowed_outbound_hosts = []
+allowed_outbound_hosts = ["https://google.co.nz"]
 key_value_stores = ["default"]
 [component.what-could-go-wrong.build]
 command = "LEPTOS_OUTPUT_NAME=what_could_go_wrong cargo build --target wasm32-wasi --release --no-default-features --features ssr"

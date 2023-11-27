@@ -14,15 +14,15 @@ cfg-if = "1"
 console_error_panic_hook = "0.1"
 futures = "0.3.29"
 http = "0.2"
-leptos = { version = "0.5" }
-leptos_integration_utils = { version = "0.5.2", optional = true }
-leptos_meta = { version = "0.5" }
-leptos_router = { version = "0.5" }
+leptos = { path = "../../../github/leptos/leptos" }
+leptos_integration_utils = { path = "../../../github/leptos/integrations/utils", optional = true }
+leptos_meta = { path = "../../../github/leptos/meta" }
+leptos_router = { path = "../../../github/leptos/router" }
 routefinder = { version = "0.5.3", optional = true }
 serde = "1.0.192"
-spin-sdk = { git = "https://github.com/fermyon/spin", branch = "main", optional = true }
+spin-sdk = { git = "https://github.com/fermyon/spin", tag = "v2.0.1", optional = true }
 url = "2.4.1"
-wasm-bindgen = { version = "=0.2.88", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
 
 [features]
 csr = ["leptos/csr", "leptos_meta/csr", "leptos_router/csr"]
